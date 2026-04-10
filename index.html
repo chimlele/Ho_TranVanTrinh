@@ -2,25 +2,31 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <title>Cây gia phả (trực hệ cha)</title>
+  <title>Cây gia phả – trực hệ cha</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- PapaParse: CSV parser chuẩn -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: #f6f6f6;
       margin: 0;
       padding: 16px;
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
     }
     h2 {
       text-align: center;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
+    }
+    h4 {
+      margin: 8px 0;
     }
     .tree {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 28px;
+      gap: 24px;
     }
     .level {
       display: flex;
@@ -30,12 +36,16 @@
     }
     .node {
       width: 140px;
-      background: #fff;
       border-radius: 10px;
-      padding: 10px;
+      padding: 10px 8px;
+      background: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,.15);
       text-align: center;
       cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+      transition: transform .15s;
+    }
+    .node:hover {
+      transform: scale(1.04);
     }
     .node img {
       width: 64px;
@@ -43,106 +53,126 @@
       border-radius: 50%;
       object-fit: cover;
       margin-bottom: 6px;
+      background: #ddd;
     }
     .name {
       font-weight: bold;
       font-size: 14px;
+      line-height: 1.2;
     }
     .year {
       font-size: 12px;
-      opacity: .8;
+      opacity: 0.8;
     }
     .male {
-      border-top: 6px solid #4a7cff;
       background: #eef3ff;
+      border-top: 5px solid #4a7cff;
     }
     .female {
-      border-top: 6px solid #ff6fa8;
       background: #ffeef5;
+      border-top: 5px solid #ff6fa8;
     }
     .spouse {
       border-style: dashed;
+    }
+    .error {
+      color: red;
+      font-weight: bold;
+      text-align: center;
     }
   </style>
 </head>
 
 <body>
   <h2>Cây gia phả (trực hệ cha – 3 đời dưới)</h2>
-
   <div id="tree" class="tree">Đang tải dữ liệu…</div>
 
   <script>
+    // === LINK GOOGLE SHEET CSV (ĐÃ SỬA &amp;) ===
     const CSV_URL =
       "https://docs.google.com/spreadsheets/d/e/2PACX-1vSIq7-JrJBxlOp6e-brAHGaWLE2pzNKeNUkaDoLaF8BaEQH0iD-D5KcwopMONrgc0qfj08KNWKfIvo4/pub?gid=0&single=true&output=csv";
 
     let PEOPLE = {};
 
-    fetch(CSV_URL)
-      .then(r => r.text())
-      .then(text => {
-        PEOPLE = parseCSV(text);
-        // người trung tâm mặc định: dòng đầu tiên
+    // === LOAD & PARSE CSV ===
+    Papa.parse(CSV_URL, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete(results) {
+        if (!results.data || !results.data.length) {
+          showError("CSV rỗng hoặc không đọc được dữ liệu");
+          return;
+        }
+
+        results.data.forEach(p => {
+          if (!p.ID) return;
+          p.PIDS = p.PIDS ? p.PIDS.split(";") : [];
+          PEOPLE[p.ID] = p;
+        });
+
         const firstId = Object.keys(PEOPLE)[0];
-        render(firstId);
-      });
+        if (!firstId) {
+          showError("Không tìm thấy ID hợp lệ trong CSV");
+          return;
+        }
 
-    function parseCSV(text) {
-      const lines = text.trim().split("\n");
-      const headers = lines.shift().split(",");
-      const data = {};
+        renderTree(firstId);
+      },
+      error(err) {
+        showError("Không tải được CSV: " + err.message);
+      }
+    });
 
-      lines.forEach(line => {
-        const cols = line.split(",");
-        const p = {};
-        headers.forEach((h, i) => p[h.trim()] = (cols[i] || "").trim());
-        p.PIDS = p.PIDS ? p.PIDS.split(";") : [];
-        data[p.ID] = p;
-      });
-
-      return data;
+    // === HELPER FUNCTIONS ===
+    function showError(msg) {
+      document.getElementById("tree").innerHTML =
+        "<div class='error'>" + msg + "</div>";
     }
 
     function getChildrenByFather(fid) {
       return Object.values(PEOPLE).filter(p => p.FID === fid);
     }
 
-    function getSpouses(person) {
-      return person.PIDS.map(id => PEOPLE[id]).filter(Boolean);
+    function getSpouses(p) {
+      return p.PIDS.map(id => PEOPLE[id]).filter(Boolean);
     }
 
-    function render(centerId) {
+    // === MAIN RENDER FUNCTION ===
+    function renderTree(centerId) {
       const center = PEOPLE[centerId];
       if (!center) return;
 
       const tree = document.getElementById("tree");
       tree.innerHTML = "";
 
-      // đời 0
+      // Trung tâm + vợ/chồng
       const spouses = getSpouses(center);
 
-      // đời 1
+      // Đời 1: con + dâu/rể
       const children = getChildrenByFather(centerId);
-      const inLaws = children.flatMap(c => getSpouses(c));
+      const inLaws1 = children.flatMap(c => getSpouses(c));
 
-      // đời 2
+      // Đời 2: cháu
       const grandchildren = children.flatMap(c => getChildrenByFather(c.ID));
 
-      // đời 3
-      const greatGrandChildren = grandchildren.flatMap(g => getChildrenByFather(g.ID));
+      // Đời 3: chắt
+      const greatGrandchildren =
+        grandchildren.flatMap(g => getChildrenByFather(g.ID));
 
       tree.append(
         renderLevel("Trung tâm", [center, ...spouses], true),
-        renderLevel("Đời 1 – Con & Dâu/Rể", [...children, ...inLaws]),
+        renderLevel("Đời 1 – Con & Dâu/Rể", [...children, ...inLaws1]),
         renderLevel("Đời 2 – Cháu", grandchildren),
-        renderLevel("Đời 3 – Chắt", greatGrandChildren)
+        renderLevel("Đời 3 – Chắt", greatGrandchildren)
       );
     }
 
+    // === UI HELPERS ===
     function renderLevel(title, list, isCenter = false) {
       const wrap = document.createElement("div");
       const h = document.createElement("h4");
       h.textContent = title;
-      h.style.margin = "0";
       wrap.appendChild(h);
 
       const level = document.createElement("div");
@@ -156,19 +186,22 @@
 
     function renderNode(p, isCenter) {
       const div = document.createElement("div");
-      const g = p["Giới tính"] === "Nam" ? "male" : "female";
-      div.className = "node " + g;
-      if (!isCenter && p.PIDS && p.PIDS.length && p.FID !== "") {
+      const genderClass = p["Giới tính"] === "Nam" ? "male" : "female";
+
+      div.className = "node " + genderClass;
+      if (!isCenter && p.PIDS && p.PIDS.length) {
         div.classList.add("spouse");
       }
+
       div.innerHTML = `
-        ${p.Photo || 
-        <div class="name">${p["Họ Và Tên"]}</div>
-        <div class="year">${p["Năm sinh - Mất"]}</div>
+        <img src="${p.Photo || "Và Tên"] || ""}</div>
+        <div class="year">${p["Năm sinh - Mất"] || ""}</div>
       `;
-      div.onclick = () => render(p.ID);
+
+      div.onclick = () => renderTree(p.ID);
       return div;
     }
   </script>
 </body>
 </html>
+``
