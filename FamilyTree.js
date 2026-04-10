@@ -1,108 +1,105 @@
-const CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSIq7-JrJBxlOp6e-brAHGaWLE2pzNKeNUkaDoLaF8BaEQH0iD-D5KcwopMONrgc0qfj08KNWKfIvo4/pub?gid=0&single=true&output=csv";
+class FamilyTree {
 
-let PEOPLE = {};
-
-// ========= LOAD CSV =========
-Papa.parse(CSV_URL, {
-  download: true,
-  header: true,
-  skipEmptyLines: true,
-  complete(results) {
-    if (!results.data || results.data.length === 0) {
-      showError("CSV không có dữ liệu");
-      return;
+    constructor(containerId, csvUrl) {
+        this.containerId = containerId;
+        this.csvUrl = csvUrl;
+        this.init();
     }
 
-    results.data.forEach(p => {
-      if (!p.ID) return;
-      p.PIDS = p.PIDS ? p.PIDS.split(";") : [];
-      PEOPLE[p.ID] = p;
-    });
+    async init() {
+        console.log("Loading CSV...");
+        const res = await fetch(this.csvUrl);
+        const text = await res.text();
+        const data = d3.csvParse(text);
 
-    const firstId = Object.keys(PEOPLE)[0];
-    if (!firstId) {
-      showError("Không tìm thấy ID hợp lệ");
-      return;
+        console.log("CSV loaded", data);
+
+        this.buildData(data);
+        this.render();
     }
 
-    renderTree(firstId);
-  },
-  error(err) {
-    showError("Lỗi tải CSV: " + err.message);
-    console.error(err);
-  }
-});
+    buildData(data) {
+        this.map = {};
 
-// ========= HELPERS =========
-function showError(msg) {
-  document.getElementById("tree").innerHTML =
-    "<div class='error'>" + msg + "</div>";
-}
+        // tạo person
+        data.forEach(d => {
+            if (!d.ID) return;
 
-function getChildrenByFather(fid) {
-  return Object.values(PEOPLE).filter(p => p.FID === fid);
-}
+            this.map[d.ID] = {
+                id: d.ID,
+                name: d["Họ Và Tên"] || "",
+                gender: d["Giới tính"],
+                birth: d["Năm sinh - Mất"] || "",
+                photo: d.Photo || "",
+                father: d.FID,
+                mother: d.MID,
+                spouses: d.PIDS ? d.PIDS.split(",") : [],
+                children: []
+            };
+        });
 
-function getSpouses(person) {
-  return person.PIDS
-    .map(id => PEOPLE[id])
-    .filter(Boolean);
-}
+        // build children
+        Object.values(this.map).forEach(p => {
+            if (p.father && this.map[p.father]) {
+                this.map[p.father].children.push(p);
+            }
+            if (p.mother && this.map[p.mother]) {
+                this.map[p.mother].children.push(p);
+            }
+        });
 
-// ========= RENDER =========
-function renderTree(centerId) {
-  const center = PEOPLE[centerId];
-  if (!center) return;
+        // tìm root (người không có cha mẹ)
+        this.root = Object.values(this.map).find(p => !p.father && !p.mother);
 
-  const tree = document.getElementById("tree");
-  tree.innerHTML = "";
+        console.log("Root:", this.root);
+    }
 
-  const spouses = getSpouses(center);
+    render() {
+        const width = 3000;
+        const height = 1500;
 
-  const children = getChildrenByFather(centerId);
-  const inLaws1 = children.flatMap(c => getSpouses(c));
+        const svg = d3.select(this.containerId)
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
 
-  const grandchildren = children.flatMap(c => getChildrenByFather(c.ID));
-  const greatGrandchildren =
-    grandchildren.flatMap(g => getChildrenByFather(g.ID));
+        const g = svg.append("g").attr("transform", "translate(50,50)");
 
-  tree.append(
-    renderLevel("Trung tâm", [center, ...spouses], true),
-    renderLevel("Đời 1 – Con & Dâu/Rể", [...children, ...inLaws1]),
-    renderLevel("Đời 2 – Cháu", grandchildren),
-    renderLevel("Đời 3 – Chắt", greatGrandchildren)
-  );
-}
+        const treeLayout = d3.tree().size([height - 100, width - 300]);
 
-function renderLevel(title, list) {
-  const wrap = document.createElement("div");
+        const rootNode = d3.hierarchy(this.root);
+        treeLayout(rootNode);
 
-  const h = document.createElement("h4");
-  h.textContent = title;
-  wrap.appendChild(h);
+        // vẽ link
+        g.selectAll(".link")
+            .data(rootNode.links())
+            .enter()
+            .append("path")
+            .attr("fill", "none")
+            .attr("stroke", "#ccc")
+            .attr("d", d3.linkHorizontal()
+                .x(d => d.y)
+                .y(d => d.x)
+            );
 
-  const level = document.createElement("div");
-  level.className = "level";
+        // vẽ node
+        const node = g.selectAll(".node")
+            .data(rootNode.descendants())
+            .enter()
+            .append("g")
+            .attr("transform", d => `translate(${d.y},${d.x})`);
 
-  list.forEach(p => level.appendChild(renderNode(p)));
-
-  wrap.appendChild(level);
-  return wrap;
-}
-
-function renderNode(p) {
-  const g = p["Giới tính"] === "Nam" ? "male" : "female";
-
-  const div = document.createElement("div");
-  div.className = "node " + g;
-
-  div.innerHTML = `
-    <img src="${p.Photo || "https://via.placeholder.com/64"}">
-    <div class="name">${p["Họ Và Tên"] || ""}</div>
-    <div class="year">${p["Năm sinh - Mất"] || ""}</div>
-  `;
-
-  div.onclick = () => renderTree(p.ID);
-  return div;
+        node.append("foreignObject")
+            .attr("width", 150)
+            .attr("height", 100)
+            .html(d => `
+                <div style="text-align:center;font-size:12px;width:140px">
+                    <img src="${d.data.photo}" 
+                         style="width:50px;height:50px;border-radius:50%"
+                         onerror="this.style.display='none'"/>
+                    <div><b>${d.data.name}</b></div>
+                    <div>${d.data.birth}</div>
+                </div>
+            `);
+    }
 }
