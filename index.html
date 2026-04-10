@@ -1,129 +1,174 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-<title>Gia phả</title>
+  <meta charset="UTF-8" />
+  <title>Cây gia phả (trực hệ cha)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<script src="https://unpkg.com/d3@7"></script>
-<script src="https://unpkg.com/topola@latest/dist/topola.min.js"></script>
-
-<style>
-body {
-    font-family: Arial;
-    margin: 0;
-}
-
-#tree {
-    width: 100%;
-    height: 100vh;
-}
-
-/* Node style */
-.node-box {
-    width: 160px;
-    text-align: center;
-    font-size: 12px;
-}
-
-.node-box img {
-    width: 60px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 50%;
-}
-
-.name {
-    font-weight: bold;
-}
-
-.year {
-    color: #666;
-    font-size: 11px;
-}
-</style>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f6f6f6;
+      margin: 0;
+      padding: 16px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .tree {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+    .level {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px;
+    }
+    .node {
+      width: 140px;
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .node img {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-bottom: 6px;
+    }
+    .name {
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .year {
+      font-size: 12px;
+      opacity: .8;
+    }
+    .male {
+      border-top: 6px solid #4a7cff;
+      background: #eef3ff;
+    }
+    .female {
+      border-top: 6px solid #ff6fa8;
+      background: #ffeef5;
+    }
+    .spouse {
+      border-style: dashed;
+    }
+  </style>
 </head>
 
 <body>
+  <h2>Cây gia phả (trực hệ cha – 3 đời dưới)</h2>
 
-<div id="tree"></div>
+  <div id="tree" class="tree">Đang tải dữ liệu…</div>
 
-<script>
+  <script>
+    const CSV_URL =
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vSIq7-JrJBxlOp6e-brAHGaWLE2pzNKeNUkaDoLaF8BaEQH0iD-D5KcwopMONrgc0qfj08KNWKfIvo4/pub?gid=0&single=true&output=csv";
 
-// 🔴 DÁN LINK GOOGLE SHEET CSV Ở ĐÂY
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSIq7-JrJBxlOp6e-brAHGaWLE2pzNKeNUkaDoLaF8BaEQH0iD-D5KcwopMONrgc0qfj08KNWKfIvo4/pub?gid=0&single=true&output=csv";
+    let PEOPLE = {};
 
-fetch(CSV_URL)
-    .then(res => res.text())
-    .then(csv => {
+    fetch(CSV_URL)
+      .then(r => r.text())
+      .then(text => {
+        PEOPLE = parseCSV(text);
+        // người trung tâm mặc định: dòng đầu tiên
+        const firstId = Object.keys(PEOPLE)[0];
+        render(firstId);
+      });
 
-        const data = d3.csvParse(csv);
+    function parseCSV(text) {
+      const lines = text.trim().split("\n");
+      const headers = lines.shift().split(",");
+      const data = {};
 
-        // Convert CSV → format Topola
-        const persons = {};
-        const relations = [];
+      lines.forEach(line => {
+        const cols = line.split(",");
+        const p = {};
+        headers.forEach((h, i) => p[h.trim()] = (cols[i] || "").trim());
+        p.PIDS = p.PIDS ? p.PIDS.split(";") : [];
+        data[p.ID] = p;
+      });
 
-        data.forEach(row => {
+      return data;
+    }
 
-            const id = row["ID"];
+    function getChildrenByFather(fid) {
+      return Object.values(PEOPLE).filter(p => p.FID === fid);
+    }
 
-            persons[id] = {
-                id: id,
-                name: row["Họ Và Tên"],
-                gender: row["Giới tính"] === "Nam" ? "M" : "F",
-                birth: row["Năm sinh - Mất"],
-                photo: row["Photo"],
-                note: row["Ghi chú"]
-            };
+    function getSpouses(person) {
+      return person.PIDS.map(id => PEOPLE[id]).filter(Boolean);
+    }
 
-            // Quan hệ cha mẹ
-            if (row["FID"] && row["MID"]) {
-                relations.push({
-                    type: "parentChild",
-                    parents: [row["FID"], row["MID"]],
-                    child: id
-                });
-            }
+    function render(centerId) {
+      const center = PEOPLE[centerId];
+      if (!center) return;
 
-            // Quan hệ vợ chồng
-            if (row["PIDS"]) {
-                row["PIDS"].split(",").forEach(pid => {
-                    relations.push({
-                        type: "couple",
-                        members: [id, pid.trim()]
-                    });
-                });
-            }
+      const tree = document.getElementById("tree");
+      tree.innerHTML = "";
 
-        });
+      // đời 0
+      const spouses = getSpouses(center);
 
-        // Init Topola
-        const chart = new Topola.Tree("#tree", {
+      // đời 1
+      const children = getChildrenByFather(centerId);
+      const inLaws = children.flatMap(c => getSpouses(c));
 
-            data: {
-                persons: persons,
-                relations: relations
-            },
+      // đời 2
+      const grandchildren = children.flatMap(c => getChildrenByFather(c.ID));
 
-            // Template node
-            nodeContent: function(person) {
-                return `
-                    <div class="node-box">
-                        <img src="${person.photo || ''}" onerror="this.style.display='none'"/>
-                        <div class="name">${person.name || ''}</div>
-                        <div class="year">${person.birth || ''}</div>
-                    </div>
-                `;
-            }
+      // đời 3
+      const greatGrandChildren = grandchildren.flatMap(g => getChildrenByFather(g.ID));
 
-        });
+      tree.append(
+        renderLevel("Trung tâm", [center, ...spouses], true),
+        renderLevel("Đời 1 – Con & Dâu/Rể", [...children, ...inLaws]),
+        renderLevel("Đời 2 – Cháu", grandchildren),
+        renderLevel("Đời 3 – Chắt", greatGrandChildren)
+      );
+    }
 
-        // Focus root (person đầu tiên)
-        const firstId = Object.keys(persons)[0];
-        chart.setRoot(firstId);
+    function renderLevel(title, list, isCenter = false) {
+      const wrap = document.createElement("div");
+      const h = document.createElement("h4");
+      h.textContent = title;
+      h.style.margin = "0";
+      wrap.appendChild(h);
 
-    });
+      const level = document.createElement("div");
+      level.className = "level";
 
-</script>
+      list.forEach(p => level.appendChild(renderNode(p, isCenter)));
 
+      wrap.appendChild(level);
+      return wrap;
+    }
+
+    function renderNode(p, isCenter) {
+      const div = document.createElement("div");
+      const g = p["Giới tính"] === "Nam" ? "male" : "female";
+      div.className = "node " + g;
+      if (!isCenter && p.PIDS && p.PIDS.length && p.FID !== "") {
+        div.classList.add("spouse");
+      }
+      div.innerHTML = `
+        ${p.Photo || 
+        <div class="name">${p["Họ Và Tên"]}</div>
+        <div class="year">${p["Năm sinh - Mất"]}</div>
+      `;
+      div.onclick = () => render(p.ID);
+      return div;
+    }
+  </script>
 </body>
 </html>
