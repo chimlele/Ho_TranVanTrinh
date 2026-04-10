@@ -1,4 +1,4 @@
-class familytree {
+class FamilyTree {
 
     constructor(containerId, csvUrl) {
         this.containerId = containerId;
